@@ -1,0 +1,6 @@
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+httpx==0.28.1
+slack-sdk[http]==3.34.0
+aiohttp==3.11.18
+pydantic-settings==2.7.0

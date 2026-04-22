@@ -1,0 +1,66 @@
+# .github/workflows/ci.yml
+#
+# CI Pipeline – DOS68K Slack Bot
+#
+# Trigger: ogni push e PR su main/develop.
+# Punto aperto #2: gli unit test DEVONO passare prima di qualunque build.
+#
+# Secrets richiesti nel repository GitHub:
+#   (nessuno per la CI pura – i test usano mock)
+
+name: CI – Test & Lint
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  test:
+    name: Unit Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run unit tests with coverage
+        env:
+          # Variabili dummy per i test (i moduli che le usano vengono mockati)
+          SLACK_BOT_TOKEN: xoxb-test-token
+          SLACK_SIGNING_SECRET: test_signing_secret_32chars_padding
+          CHATBOT_API_KEY: test-api-key
+          CHATBOT_BASE_URL: https://fake.example.com
+          DYNAMODB_SESSIONS_TABLE: test-sessions
+          AWS_DEFAULT_REGION: eu-south-1
+          AWS_ACCESS_KEY_ID: testing
+          AWS_SECRET_ACCESS_KEY: testing
+        run: |
+          pytest tests/ \
+            --cov=src \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml \
+            --cov-fail-under=80 \
+            -v
+
+      - name: Upload coverage report
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage.xml
+          fail_ci_if_error: false
