@@ -1,6 +1,6 @@
 # Secrets – mai su Git
 .env
-
+env_example
 # Python
 __pycache__/
 *.py[cod]
