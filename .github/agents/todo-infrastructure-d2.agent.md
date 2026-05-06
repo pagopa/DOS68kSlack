@@ -22,7 +22,7 @@ The infrastructure is based on AWS and includes the following components:
 - AWS RDS 
 - AWS SQS
 - AWS Route 53
-- AWS Elsticache
+- AWS ElastiCache
 - AWS Cognito
 
 ## Key files and folders
