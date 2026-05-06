@@ -84,10 +84,10 @@ module "ecs_service" {
   public_subnet_ids  = data.aws_subnets.public.ids
 
   # ECS
-  ecs_cluster_arn             = data.aws_ecs_cluster.main.arn
-  container_image             = var.container_image
-  task_cpu                    = var.task_cpu
-  task_memory                 = var.task_memory
+  ecs_cluster_arn = data.aws_ecs_cluster.main.arn
+  container_image = var.container_image
+  task_cpu        = var.task_cpu
+  task_memory     = var.task_memory
 
   # Application environment
   log_level         = var.log_level
