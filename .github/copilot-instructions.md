@@ -4,20 +4,20 @@
 
 ### Build & Test
 ```bash
-# Install dependencies
-pip install -r requirements.txt -r requirements-dev.txt
+# Install all dependencies (production + dev)
+uv sync
 
 # Run all tests
-pytest tests/ -v
+uv run pytest tests/ -v
 
 # Run a single test by name
-pytest tests/test_all.py::TestSlackVerifier::test_valid_signature_passes -v
+uv run pytest tests/test_all.py::TestSlackVerifier::test_valid_signature_passes -v
 
 # Run tests with coverage (must meet 80% threshold for CI)
-pytest tests/ --cov=src --cov-report=term-missing --cov-fail-under=80 -v
+uv run pytest tests/ --cov=src --cov-report=term-missing --cov-fail-under=80 -v
 
 # Run tests as they execute in CI/CD
-pytest tests/ \
+uv run pytest tests/ \
   --cov=src \
   --cov-report=term-missing \
   --cov-report=xml:coverage.xml \
@@ -25,7 +25,17 @@ pytest tests/ \
   -v
 
 # Local development server (use with ngrok for Slack integration)
-uvicorn src.app:app --reload --port 8000
+uv run uvicorn src.app:app --reload --port 8000
+```
+
+### Dependency Management
+```bash
+uv add <package>              # add a production dependency
+uv add --group dev <package>  # add a dev dependency
+uv remove <package>           # remove a dependency
+uv lock                       # regenerate uv.lock after editing pyproject.toml
+uv sync                       # install all deps from lock file (incl. dev)
+uv sync --no-dev              # install production deps only
 ```
 
 ### CI/CD Pipeline
@@ -252,8 +262,9 @@ After image push to ECR, the ECS service is updated with a rolling deployment st
 
 **Tests fail locally but pass in CI**
 - Ensure all required env vars are set (see "Environment Variables" section)
-- Check Python version: CI uses Python 3.12
+- Check Python version: CI uses Python 3.12 (run `uv python install 3.12` if needed)
 - Verify mock setup in tests matches your code changes
+- Run `uv sync --frozen` to ensure your venv matches the lock file
 
 ## MCP Servers
 
@@ -306,9 +317,9 @@ Use this when:
 When Copilot runs in your repository, it uses the `copilot-setup-steps.yml` workflow to prepare its environment:
 
 1. Checks out your code
-2. Installs Python 3.12
-3. Installs all production dependencies from `requirements.txt`
-4. Installs all development dependencies from `requirements-dev.txt`
+2. Installs uv (`astral-sh/setup-uv@v5`)
+3. Installs Python 3.12 via `uv python install 3.12`
+4. Installs all dependencies (production + dev) via `uv sync --frozen`
 5. Verifies the installation with version checks
 
 This ensures Copilot can immediately build, test, and lint your code without discovering dependencies on its own.
@@ -322,6 +333,7 @@ dos68k-slack-bot/
 │   └── workflows/
 │       ├── ci.yml               (test on all pushes/PRs)
 │       ├── deploy.yml           (deploy on main)
+│       ├── build-and-push.yml   (manual Docker build + push to GHCR)
 │       └── copilot-setup-steps.yml  (Copilot environment setup)
 ├── src/
 │   ├── __init__.py
@@ -333,8 +345,8 @@ dos68k-slack-bot/
 │   └── logging_config.py        (logging setup)
 ├── tests/
 │   └── test_all.py              (pytest suite)
-├── requirements.txt             (production dependencies)
-├── requirements-dev.txt         (dev/CI dependencies)
+├── pyproject.toml               (project metadata + all dependencies)
+├── uv.lock                      (pinned dependency lock file)
 ├── Dockerfile
 └── README.md
 ```

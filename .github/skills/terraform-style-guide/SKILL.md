@@ -30,9 +30,9 @@ When generating Terraform code:
 | `outputs.tf` | Output value declarations (alphabetical) |
 | `locals.tf` | Local value declarations |
 
-1. Use modles for larger projects to group related resources. 
+1. Use modules for larger projects to group related resources. 
 2. Save modules in infra/modules/ and reference them from root configuration.
-3. root modules are in infra/<dev> and infra/<prod> 
+3. Root modules are in infra/<dev> and infra/<prod> 
 
 ### Example Structure
 
