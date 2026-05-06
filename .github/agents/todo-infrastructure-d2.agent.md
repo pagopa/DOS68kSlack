@@ -11,7 +11,7 @@ tools:
 # Todo D2 infrastructure diagrams
 
 You are responsible for creating diagrams for the infrastructure of the developer portal using D2.
-The infrastrucutre is based on AWS and includes the following components:
+The infrastructure is based on AWS and includes the following components:
 - AWS Lambda
 - AWS API Gateway
 - AWS S3
