@@ -5,7 +5,7 @@
 ### Build & Test
 ```bash
 # Install dependencies
-pip install -r requirements.txt -r requirements-dev.txt
+uv sync --dev
 
 # Run all tests
 pytest tests/ -v
