@@ -4,8 +4,13 @@
 
 ### Build & Test
 ```bash
+
 # Install all dependencies (production + dev)
 uv sync
+
+# Install dependencies
+uv sync --dev
+
 
 # Run all tests
 uv run pytest tests/ -v
