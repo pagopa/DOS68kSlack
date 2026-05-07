@@ -17,9 +17,7 @@ Slack Events API
 Application Load Balancer (AWS)
      │
      ▼
-ECS Fargate – dos68k-slack-bot (FastAPI + Uvicorn)
-     │                │
-     │                └──► DynamoDB  (slack_user_id → session_id)
+ECS Fargate – dos68k-slack-bot (FastAPI + Uvicorn)   
      │
      └──► DOS68K Chatbot API (API Gateway + ECS esistente)
                POST /sessions
@@ -58,7 +56,6 @@ usare Lambda + SQS per il disaccoppiamento.
 | `SLACK_SIGNING_SECRET` | – | Signing secret Slack (da Secrets Manager) |
 | `CHATBOT_API_KEY` | – | API key DOS68K (da Secrets Manager) |
 | `CHATBOT_BASE_URL` | URL DEV | Base URL chatbot |
-| `DYNAMODB_SESSIONS_TABLE` | `dos68k-slack-sessions` | Nome tabella DynamoDB **(configurabile)** |
 | `SLACK_SESSION_TTL_SECONDS` | `3600` | TTL sessioni Slack in secondi |
 | `LOG_HEALTH_CHECKS` | `false` | Se `true`, logga le chiamate a `/health` |
 | `LOG_LEVEL` | `INFO` | Livello di logging |
@@ -77,20 +74,11 @@ viene eseguito solo dopo il successo del job `test`.
 Il job `deploy` ha `needs: test`. Se anche un solo test fallisce,
 la build Docker non parte.
 
-### #3 – `expiresAt` null in DynamoDB
-`session_manager.compute_expires_at_epoch()` calcola `createdAt + 90 giorni`
-in formato Unix epoch. Il valore viene loggato ad ogni creazione sessione.
-Quando il backend DOS68K esporrà il campo in scrittura, basterà passarlo
-nel body di `POST /sessions`.
-
-### #4 – Health check non loggati
+### #3 – Health check non loggati
 `logging_config.HealthCheckFilter` filtra le righe contenenti `/health`
 da tutti i logger (incluso `uvicorn.access`). Controllabile via
 `LOG_HEALTH_CHECKS=true` per debug temporaneo.
 
-### #5 – Nomi tabelle DynamoDB configurabili
-Tutti i riferimenti a DynamoDB usano `settings.dynamodb_sessions_table`
-letta dall'env var `DYNAMODB_SESSIONS_TABLE`. Zero hardcoding.
 
 ---
 
