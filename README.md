@@ -1,15 +1,15 @@
 # DOS68K Slack Bot
 
-Slack bot che espone il chatbot **DOS68K** di PagoPA agli utenti interni,
-gestendo sessioni per-utente tramite Amazon DynamoDB.
+A Slack bot that exposes the **DOS68K** PagoPA chatbot to internal users.
+It handles per-user sessions and supports RAG-based responses with source links.
 
 ---
 
-## Architettura
+## Architecture
 
 ```
-Utente Slack
-     │  messaggio
+Slack User
+     │  message
      ▼
 Slack Events API
      │  POST /slack/events  (HTTPS)
@@ -17,99 +17,139 @@ Slack Events API
 Application Load Balancer (AWS)
      │
      ▼
-ECS Fargate – dos68k-slack-bot (FastAPI + Uvicorn)   
+ECS Fargate – dos68k-slack-bot (FastAPI + Uvicorn)
      │
-     └──► DOS68K Chatbot API (API Gateway + ECS esistente)
+     └──► DOS68K Chatbot API (API Gateway + existing ECS)
                POST /sessions
                POST /queries/{sessionId}
+               GET  /sessions/{sessionId}
+               GET  /sessions/all
                DELETE /sessions/{sessionId}
 ```
 
-**Perché ECS Fargate e non Lambda?**
+**Why ECS Fargate instead of Lambda?**
 
-Il chatbot con RAG può impiegare > 3 secondi; Slack richiede ACK in < 3s.
-Con ECS possiamo rispondere immediatamente con `200 OK` e inviare la risposta
-al canale in modo asincrono (uvicorn è non-bloccante). In alternativa si può
-usare Lambda + SQS per il disaccoppiamento.
+The RAG-based chatbot can take > 3 seconds to respond, while Slack requires
+an HTTP ACK within 3 seconds. With ECS Fargate + FastAPI `BackgroundTasks`,
+the bot acknowledges Slack immediately and processes the query asynchronously,
+with no additional infrastructure needed. Lambda would require an SQS queue
+and a separate consumer function to achieve the same result.
+
+Additionally, the active session mapping (`_active_sessions`) lives in memory
+for the duration of the container — something Lambda cannot provide across
+invocations.
 
 ---
 
-## Componenti AWS
+## AWS Components
 
-| Componente | Scopo |
+| Component | Purpose |
 |---|---|
-| **ECS Fargate** | Hosting del bot (scalabile, no server management) |
-| **ECR** | Registry immagini Docker |
-| **Application Load Balancer** | Terminazione TLS + routing verso ECS |
-| **DynamoDB** | Mapping sessioni Slack → DOS68K (TTL nativo) |
+| **ECS Fargate** | Bot hosting (scalable, no server management) |
+| **ECR** | Docker image registry |
+| **Application Load Balancer** | TLS termination + routing to ECS |
 | **Secrets Manager** | `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `CHATBOT_API_KEY` |
-| **CloudWatch Logs** | Log centralizzati; health check esclusi di default |
-| **IAM (OIDC)** | GitHub Actions autentica su AWS senza credenziali statiche |
+| **CloudWatch Logs** | Centralised logging; health check calls excluded by default |
+| **IAM (OIDC)** | GitHub Actions authenticates to AWS without static credentials |
 
 ---
 
-## Variabili d'ambiente
+## Environment Variables
 
-| Variabile | Default | Descrizione |
+| Variable | Default | Description |
 |---|---|---|
-| `SLACK_BOT_TOKEN` | – | Token OAuth Slack (da Secrets Manager) |
-| `SLACK_SIGNING_SECRET` | – | Signing secret Slack (da Secrets Manager) |
-| `CHATBOT_API_KEY` | – | API key DOS68K (da Secrets Manager) |
-| `CHATBOT_BASE_URL` | URL DEV | Base URL chatbot |
-| `SLACK_SESSION_TTL_SECONDS` | `3600` | TTL sessioni Slack in secondi |
-| `LOG_HEALTH_CHECKS` | `false` | Se `true`, logga le chiamate a `/health` |
-| `LOG_LEVEL` | `INFO` | Livello di logging |
-| `AWS_REGION` | `eu-south-1` | Regione AWS |
+| `SLACK_BOT_TOKEN` | – | Slack OAuth token (from Secrets Manager) |
+| `SLACK_SIGNING_SECRET` | – | Slack signing secret (from Secrets Manager) |
+| `CHATBOT_API_KEY` | – | DOS68K API key (from Secrets Manager) |
+| `CHATBOT_BASE_URL` | – | Chatbot backend base URL |
+| `LOG_HEALTH_CHECKS` | `false` | Set to `true` to include `/health` calls in logs |
+| `LOG_LEVEL` | `INFO` | Logging level: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 
 ---
 
-## Punti aperti risolti
+## Bot Commands
 
-### #1 – GitHub Action build + push con tag = commit SHA
-Vedi `.github/workflows/deploy.yml`. Il tag dell'immagine ECR è sempre
-`${{ github.sha }}` (commit SHA completo). Il job `build-and-push`
-viene eseguito solo dopo il successo del job `test`.
+| Command | Description |
+|---|---|
+| Any text | Sends the message to the chatbot on the active session. Creates a new session automatically if none is active. |
+| `new` | Creates a new DOS68K session and sets it as active |
+| `list` | Lists all existing sessions with their IDs |
+| `resume <id>` | Resumes a previous session by ID |
+| `help` | Shows available commands |
 
-### #2 – Unit test prima della build
-Il job `deploy` ha `needs: test`. Se anche un solo test fallisce,
-la build Docker non parte.
-
-### #3 – Health check non loggati
-`logging_config.HealthCheckFilter` filtra le righe contenenti `/health`
-da tutti i logger (incluso `uvicorn.access`). Controllabile via
-`LOG_HEALTH_CHECKS=true` per debug temporaneo.
-
+**RAG responses** automatically include a *Sources* section at the end of the
+message, with clickable links to the documents used to generate the answer.
 
 ---
 
-## Setup Slack App
+## Session Management
 
-1. Vai su https://api.slack.com/apps e crea una nuova app.
-2. **OAuth & Permissions** → Bot Token Scopes: `chat:write`, `reactions:add`.
-3. **Event Subscriptions** → abilita, imposta Request URL:
-   `https://<tuo-alb>/slack/events`
-4. Subscribe to bot events: `message.im`, `message.channels`, `app_mention`.
-5. Installa l'app nel workspace e copia `Bot User OAuth Token`.
-6. Copia il `Signing Secret` dalla sezione Basic Information.
+Active sessions are stored in a Python in-memory dictionary (`_active_sessions`),
+mapping each Slack user ID to their current DOS68K session ID.
+
+- Sessions **do not persist** across container restarts.
+- After a restart, users can run `list` + `resume <id>` to pick up a previous session.
+- If scaling horizontally to multiple ECS tasks, replace `_active_sessions`
+  with a shared external cache (e.g. **ElastiCache Redis**).
+
+**Event deduplication**: Slack retries events if no response is received within
+3 seconds. The bot deduplicates by `event_id`, ignoring retries of already
+processed events (TTL: 5 minutes).
 
 ---
 
-## Sviluppo locale
+## Slack App Setup
+
+1. Go to [api.slack.com/apps](https://api.slack.com/apps) and create a new app (**From scratch**).
+2. **OAuth & Permissions → Bot Token Scopes** — add:
+   - `chat:write`, `im:write`, `im:read`, `im:history`
+   - `channels:history`, `groups:history`, `groups:read`
+   - `app_mentions:read`
+3. **Event Subscriptions** → enable, set Request URL to `https://<your-alb>/slack/events`.
+4. **Subscribe to bot events** — add: `message.im`, `message.channels`, `message.groups`, `app_mention`.
+5. **App Home → Show Tabs** → enable **Messages Tab** → check *Allow users to send Slash commands and messages from the messages tab*.
+6. **Install to Workspace** → copy the **Bot User OAuth Token** (`xoxb-...`).
+7. Copy the **Signing Secret** from **Basic Information → App Credentials**.
+
+> ⚠️ Reinstall the app every time you modify OAuth scopes and update `SLACK_BOT_TOKEN` in `.env`.
+
+---
+
+## Local Development
 
 ```bash
-# Copia e compila il file di configurazione
-cp .env.example .env
-# Edita .env con i tuoi valori
+# 1. Clone the repo and enter the project directory
+git clone <repo-url>
+cd dos68k-slack-bot
 
-# Installa dipendenze
+# 2. Create and activate a virtual environment
+python3 -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+
+# 3. Install dependencies
 pip install -r requirements.txt -r requirements-dev.txt
 
-# Esegui i test
+# 4. Configure environment variables
+cp .env.example .env
+# Edit .env with your actual values
+
+# 5. Run tests
 pytest tests/ -v
 
-# Avvia il server locale (usa ngrok per esporre a Slack)
+# 6. Start the server
 uvicorn src.app:app --reload --port 8000
+
+# 7. Expose locally via ngrok (in a separate terminal)
 ngrok http 8000
+# Copy the HTTPS URL and set it as the Request URL in Slack Event Subscriptions
+```
+
+Or using the Makefile:
+
+```bash
+make install   # create venv and install dependencies
+make run       # start the server
+make test      # run tests
 ```
 
 ---
@@ -121,15 +161,18 @@ git push origin main
         │
         ├─► [CI] pytest → coverage ≥ 80%
         │
-        └─► [Deploy] (solo su main)
-                ├─► pytest (gate)
-                ├─► docker build + push ECR (tag = commit SHA)
-                └─► ECS deploy (rolling update)
+        └─► [Deploy] (main branch only)
+                ├─► pytest (gate — build blocked if tests fail)
+                ├─► docker build + push to ECR (tag = commit SHA)
+                └─► ECS rolling update
 ```
 
-Secrets GitHub Actions da configurare:
-- `AWS_ROLE_ARN`
-- `ECR_REPOSITORY`
-- `ECS_CLUSTER`
-- `ECS_SERVICE`
-- `ECS_TASK_DEFINITION`
+Required GitHub Actions secrets:
+
+| Secret | Description |
+|---|---|
+| `AWS_ROLE_ARN` | IAM Role ARN with ECR + ECS permissions (OIDC) |
+| `ECR_REPOSITORY` | Full ECR URI (e.g. `123456789.dkr.ecr.eu-south-1.amazonaws.com/dos68k-slack-bot`) |
+| `ECS_CLUSTER` | ECS cluster name |
+| `ECS_SERVICE` | ECS service name |
+| `ECS_TASK_DEFINITION` | ECS task definition name |
