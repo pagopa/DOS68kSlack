@@ -10,8 +10,9 @@ Endpoint usati:
   POST /sessions/{session_id}/clear → resetta la storia della sessione
 
 Autenticazione:
-  x-api-key  → CHATBOT_API_KEY  (tutte le richieste)
-  x-user-id  → UUID derivato dallo slack_user_id (tutte le richieste)
+  x-api-key    → CHATBOT_API_KEY  (tutte le richieste)
+  x-user-id    → UUID derivato dallo slack_user_id (tutte le richieste)
+  X-User-Role  → stesso UUID di x-user-id (tutte le richieste)
 """
 
 import logging
@@ -57,7 +58,7 @@ class DOS68KClient:
         uuid5 è deterministico: stesso slack_user_id → stesso UUID sempre.
         """
         user_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"slack:{slack_user_id}"))
-        return {"x-user-id": user_uuid}
+        return {"x-user-id": user_uuid, "X-User-Role": user_uuid}
 
     async def create_session(self, slack_user_id: str, title: str = "Slack Chat") -> str:
         """Crea una nuova sessione su DOS68K e restituisce il session_id."""
