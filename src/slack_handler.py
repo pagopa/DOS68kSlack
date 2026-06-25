@@ -1,18 +1,18 @@
 """
-Orchestratore principale degli eventi Slack.
+Main Slack event orchestrator.
 
-Flusso per ogni messaggio ricevuto:
-  1. ack()     → verifica firma + gestisce challenge, risponde entro 3s
-  2. process() → elaborazione in background (crea sessione, invia query, risponde)
+Flow for each received message:
+  1. ack()     → verifies signature + handles challenge, responds within 3s
+  2. process() → background processing (creates session, sends query, responds)
 
-Deduplicazione:
-  Slack può reinviare lo stesso evento se non riceve risposta entro 3s.
-  Teniamo in memoria gli event_id già processati (con TTL di 5 minuti)
-  per ignorare i duplicati.
+Deduplication:
+  Slack may resend the same event if no response is received within 3s.
+  Processed event_ids are kept in memory (with 5-minute TTL)
+  to ignore duplicates.
 
-Gestione sessione attiva:
-  Il mapping slack_user_id → session_id attiva è tenuto in un dizionario
-  in memoria (_active_sessions). Non persiste al riavvio del container.
+Active session management:
+  The slack_user_id → active session_id mapping is kept in an in-memory
+  dictionary (_active_sessions). Does not persist across container restarts.
 """
 
 import asyncio
@@ -30,36 +30,36 @@ from src.chatbot_client import DOS68KClient, ChatbotAPIError, SessionNotFoundErr
 
 logger = logging.getLogger(__name__)
 
-# Mapping in memoria: slack_user_id → session_id attiva
+# In-memory mapping: slack_user_id → active session_id
 _active_sessions: dict[str, str] = {}
 
-# Cache event_id già processati: event_id → timestamp
-# Previene la doppia elaborazione dei retry di Slack
+# Cache of processed event_ids: event_id → timestamp
+# Prevents double-processing of Slack retries
 _processed_events: dict[str, float] = {}
-_EVENT_TTL = 300  # 5 minuti
+_EVENT_TTL = 300  # 5 minutes
 
 
-HELP_TEXT = """*DOS68K Slack Bot* – Comandi disponibili:
-• `new` – Crea una nuova sessione e la imposta come attiva
-• `list` – Mostra le sessioni esistenti con i loro ID
-• `resume <id>` – Riprende una sessione precedente
-• `help` – Mostra questo messaggio
+HELP_TEXT = """*DOS68K Slack Bot* – Available commands:
+• `new` – Creates a new session and sets it as active
+• `list` – Lists existing sessions with their IDs
+• `resume <id>` – Resumes a previous session
+• `help` – Shows this message
 
-Qualsiasi altro testo viene inviato come domanda al chatbot nella sessione attiva.
-Se non c'è una sessione attiva, viene creata automaticamente.
+Any other text is sent as a question to the chatbot on the active session.
+If there is no active session, one is created automatically.
 """
 
 
 def _is_duplicate(event_id: str) -> bool:
-    """Restituisce True se l'evento è già stato processato."""
+    """Returns True if the event has already been processed."""
     now = time.time()
-    # Pulizia entries scadute
+    # Clean up expired entries
     expired = [k for k, v in _processed_events.items() if now - v > _EVENT_TTL]
     for k in expired:
         del _processed_events[k]
 
     if event_id in _processed_events:
-        logger.info(f"Evento duplicato ignorato: {event_id}")
+        logger.info(f"Duplicate event ignored: {event_id}")
         return True
 
     _processed_events[event_id] = now
@@ -73,34 +73,34 @@ class SlackHandler:
 
     async def ack(self, headers: dict, body_str: str) -> Tuple[str | None, int]:
         """
-        Verifica la firma e gestisce i casi che richiedono risposta sincrona.
-        Restituisce (response_body, status_code) se deve rispondere direttamente,
-        oppure (None, 200) se l'evento va processato in background.
+        Verifies the signature and handles cases requiring a synchronous response.
+        Returns (response_body, status_code) if a direct response is needed,
+        or (None, 200) if the event should be processed in background.
         """
         try:
             verify_slack_request(headers, body_str)
         except SlackVerificationError as e:
-            logger.warning(f"Verifica firma fallita: {e}")
+            logger.warning(f"Signature verification failed: {e}")
             return json.dumps({"error": "Forbidden"}), 403
 
         body = json.loads(body_str)
 
-        # URL verification challenge (primo setup Slack App) — risposta sincrona obbligatoria
+        # URL verification challenge (initial Slack App setup) — synchronous response required
         if body.get("type") == "url_verification":
-            logger.info("Slack URL verification challenge ricevuto")
+            logger.info("Slack URL verification challenge received")
             return json.dumps({"challenge": body["challenge"]}), 200
 
         return None, 200
 
     async def process(self, headers: dict, body_str: str) -> None:
         """
-        Elaborazione asincrona dell'evento (eseguita in background).
-        Gestisce la deduplicazione e instrada al metodo corretto.
+        Asynchronous event processing (executed in background).
+        Handles deduplication and routes to the correct method.
         """
         body = json.loads(body_str)
         event_id = body.get("event_id", "")
 
-        # Deduplicazione: ignora i retry di Slack
+        # Deduplication: ignore Slack retries
         if event_id and _is_duplicate(event_id):
             return
 
@@ -108,18 +108,18 @@ class SlackHandler:
         event_type = event.get("type", "")
 
         if event_type == "message":
-            # Risponde solo ai messaggi diretti (DM), non a quelli nei canali.
-            # Nei canali risponde esclusivamente tramite app_mention (@Discovery68k).
-            # channel_type="im" = DM, "group" = canale privato, "channel" = pubblico.
+            # Respond only to direct messages (DM), not to channel messages.
+            # In channels, respond exclusively via app_mention (@Discovery68k).
+            # channel_type="im" = DM, "group" = private channel, "channel" = public.
             channel_type = event.get("channel_type", "")
             if channel_type == "im":
                 await self._handle_message(event)
             else:
-                logger.debug("Messaggio in canale ignorato (usa @Discovery68k per interagire)")
+                logger.debug("Channel message ignored (use @Discovery68k to interact)")
         elif event_type == "app_mention":
             await self._handle_message(event, strip_mention=True)
         else:
-            logger.debug(f"Evento ignorato: {event_type}")
+            logger.debug(f"Event ignored: {event_type}")
 
     async def _handle_message(self, event: dict, strip_mention: bool = False) -> None:
         if event.get("bot_id") or event.get("subtype"):
@@ -162,45 +162,45 @@ class SlackHandler:
             _active_sessions[user_id] = session_id
             await self._post(
                 channel_id,
-                f"✅ Nuova sessione creata e impostata come attiva.\nID: `{session_id}`",
+                f"✅ New session created and set as active.\nID: `{session_id}`",
             )
         except ChatbotAPIError as e:
-            await self._post(channel_id, f"⚠️ Errore nella creazione della sessione (HTTP {e.status_code}).")
+            await self._post(channel_id, f"⚠️ Error creating session (HTTP {e.status_code}).")
 
     async def _cmd_list(self, user_id: str, channel_id: str) -> None:
         try:
             sessions = await self._chatbot.list_sessions(user_id)
         except ChatbotAPIError as e:
-            await self._post(channel_id, f"⚠️ Errore nel recupero delle sessioni (HTTP {e.status_code}).")
+            await self._post(channel_id, f"⚠️ Error retrieving sessions (HTTP {e.status_code}).")
             return
 
         if not sessions:
-            await self._post(channel_id, "Non hai sessioni precedenti. Usa `new` per iniziarne una.")
+            await self._post(channel_id, "You have no previous sessions. Use `new` to start one.")
             return
 
         active_id = _active_sessions.get(user_id)
-        lines = ["*Le tue sessioni:*"]
+        lines = ["*Your sessions:*"]
         for s in sessions:
             sid = s.get("id", "?")
             title = s.get("title", "—")
             created = s.get("createdAt", "")[:10]
-            marker = " ◀ *attiva*" if sid == active_id else ""
+            marker = " ◀ *active*" if sid == active_id else ""
             lines.append(f"• `{sid}` – _{title}_ ({created}){marker}")
-        lines.append("\nUsa `resume <id>` per riprendere una sessione.")
+        lines.append("\nUse `resume <id>` to resume a session.")
         await self._post(channel_id, "\n".join(lines))
 
     async def _cmd_resume(self, user_id: str, channel_id: str, session_id: str) -> None:
         if not session_id:
-            await self._post(channel_id, "Uso corretto: `resume <id>`")
+            await self._post(channel_id, "Correct usage: `resume <id>`")
             return
         try:
             await self._chatbot.get_session(user_id, session_id)
             _active_sessions[user_id] = session_id
-            await self._post(channel_id, f"✅ Sessione `{session_id}` ripresa. Puoi continuare a scrivere.")
+            await self._post(channel_id, f"✅ Session `{session_id}` resumed. You can continue writing.")
         except SessionNotFoundError:
-            await self._post(channel_id, f"⚠️ Sessione `{session_id}` non trovata. Usa `list` per vedere le sessioni disponibili.")
+            await self._post(channel_id, f"⚠️ Session `{session_id}` not found. Use `list` to see available sessions.")
         except ChatbotAPIError as e:
-            await self._post(channel_id, f"⚠️ Errore nella verifica della sessione (HTTP {e.status_code}).")
+            await self._post(channel_id, f"⚠️ Error verifying session (HTTP {e.status_code}).")
 
     async def _cmd_query(self, user_id: str, channel_id: str, text: str) -> None:
         session_id = _active_sessions.get(user_id)
@@ -212,12 +212,12 @@ class SlackHandler:
                     title=f"Slack – {user_id}",
                 )
                 _active_sessions[user_id] = session_id
-                logger.info(f"Sessione creata automaticamente: {session_id} per utente {user_id}")
+                logger.info(f"Session auto-created: {session_id} for user {user_id}")
             except ChatbotAPIError as e:
-                await self._post(channel_id, f"⚠️ Errore nella creazione della sessione (HTTP {e.status_code}).")
+                await self._post(channel_id, f"⚠️ Error creating session (HTTP {e.status_code}).")
                 return
 
-        # Mostra subito il placeholder "sta scrivendo"
+        # Show the "typing" placeholder immediately
         placeholder_ts = await self._post_thinking(channel_id)
 
         try:
@@ -225,7 +225,7 @@ class SlackHandler:
             await self._update_or_post(channel_id, placeholder_ts, answer)
 
         except SessionNotFoundError:
-            logger.warning(f"Sessione {session_id} scaduta, ricreazione automatica...")
+            logger.warning(f"Session {session_id} expired, auto-recreating...")
             _active_sessions.pop(user_id, None)
             try:
                 session_id = await self._chatbot.create_session(
@@ -236,49 +236,49 @@ class SlackHandler:
                 answer = await self._chatbot.send_query(user_id, session_id, text)
                 await self._update_or_post(channel_id, placeholder_ts, answer)
             except ChatbotAPIError as e:
-                await self._update_or_post(channel_id, placeholder_ts, f"⚠️ Errore (HTTP {e.status_code}). Riprova tra poco.")
+                await self._update_or_post(channel_id, placeholder_ts, f"⚠️ Error (HTTP {e.status_code}). Please try again.")
 
         except ChatbotAPIError as e:
-            logger.error(f"Errore API DOS68K: {e}")
+            logger.error(f"DOS68K API error: {e}")
             await self._update_or_post(
                 channel_id, placeholder_ts,
-                f"⚠️ Errore nel contattare il chatbot (HTTP {e.status_code}). Riprova tra poco.",
+                f"⚠️ Error contacting the chatbot (HTTP {e.status_code}). Please try again.",
             )
         except Exception as e:
-            logger.error(f"Errore imprevisto: {e}", exc_info=True)
-            await self._update_or_post(channel_id, placeholder_ts, "⚠️ Si è verificato un errore imprevisto. Riprova tra poco.")
+            logger.error(f"Unexpected error: {e}", exc_info=True)
+            await self._update_or_post(channel_id, placeholder_ts, "⚠️ An unexpected error occurred. Please try again.")
 
     async def _post_thinking(self, channel: str) -> str | None:
         """
-        Invia un messaggio placeholder visibile mentre il chatbot elabora.
-        Restituisce il timestamp del messaggio (usato per aggiornarlo dopo).
+        Posts a visible placeholder message while the chatbot processes.
+        Returns the message timestamp (used to update it afterwards).
         """
         try:
             resp = await self._slack.chat_postMessage(
                 channel=channel,
-                text="_⏳ Sto elaborando la tua richiesta..._",
+                text="_⏳ Processing your request..._",
             )
             return resp.get("ts")
         except SlackApiError as e:
-            logger.error(f"Errore invio placeholder: {e}")
+            logger.error(f"Error sending placeholder: {e}")
             return None
 
     async def _update_or_post(self, channel: str, ts: str | None, text: str) -> None:
         """
-        Aggiorna il messaggio placeholder con la risposta finale.
-        Se per qualsiasi motivo il timestamp non è disponibile, invia un nuovo messaggio.
+        Updates the placeholder message with the final response.
+        If for any reason the timestamp is not available, sends a new message.
         """
         if ts:
             try:
                 await self._slack.chat_update(channel=channel, ts=ts, text=text)
                 return
             except SlackApiError as e:
-                logger.warning(f"Impossibile aggiornare il messaggio ({e}), invio nuovo messaggio")
-        # Fallback: nuovo messaggio
+                logger.warning(f"Unable to update message ({e}), sending new message")
+        # Fallback: new message
         await self._post(channel, text)
 
     async def _post(self, channel: str, text: str) -> None:
         try:
             await self._slack.chat_postMessage(channel=channel, text=text)
         except SlackApiError as e:
-            logger.error(f"Errore invio messaggio Slack: {e}")
+            logger.error(f"Error sending Slack message: {e}")

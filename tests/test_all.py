@@ -1,6 +1,6 @@
 """
-Unit test per DOS68K Slack Bot.
-Eseguiti da pytest prima di ogni build Docker (punto aperto #2).
+Unit tests for DOS68K Slack Bot.
+Run by pytest before every Docker build.
 """
 
 import hashlib
@@ -61,7 +61,7 @@ class TestSlackVerifier:
             "x-slack-request-timestamp": ts,
             "x-slack-signature": "v0=invalidsignature",
         }
-        with pytest.raises(SlackVerificationError, match="Firma Slack non valida"):
+        with pytest.raises(SlackVerificationError, match="Invalid Slack signature"):
             verify_slack_request(headers, body)
 
     def test_old_timestamp_raises(self):
@@ -73,12 +73,12 @@ class TestSlackVerifier:
             FAKE_SIGNING_SECRET.encode(), sig_basestring.encode(), hashlib.sha256
         ).hexdigest()
         headers = {"x-slack-request-timestamp": old_ts, "x-slack-signature": sig}
-        with pytest.raises(SlackVerificationError, match="troppo vecchia"):
+        with pytest.raises(SlackVerificationError, match="too old"):
             verify_slack_request(headers, body)
 
     def test_missing_headers_raises(self):
         from src.slack_verifier import verify_slack_request, SlackVerificationError
-        with pytest.raises(SlackVerificationError, match="mancanti"):
+        with pytest.raises(SlackVerificationError, match="Missing"):
             verify_slack_request({}, '{"type": "message"}')
 
 
@@ -148,7 +148,7 @@ class TestDOS68KClient:
 
 
 # ---------------------------------------------------------------------------
-# Test: logging_config (punto aperto #4)
+# Test: logging_config
 # ---------------------------------------------------------------------------
 
 class TestHealthCheckFilter:

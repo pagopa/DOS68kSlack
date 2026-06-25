@@ -1,7 +1,7 @@
 """
-Configurazione centralizzata tramite variabili d'ambiente.
-Tutti i valori sensibili vanno in AWS Secrets Manager
-e vengono iniettati come env vars al container ECS.
+Centralised configuration via environment variables.
+All sensitive values go into AWS Secrets Manager
+and are injected as env vars into the ECS container.
 """
 
 from pydantic_settings import BaseSettings

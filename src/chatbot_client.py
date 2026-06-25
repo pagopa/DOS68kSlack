@@ -1,18 +1,18 @@
 """
-Client HTTP per le API DOS68K (chatbot PagoPA).
+HTTP client for the DOS68K APIs (PagoPA chatbot).
 
-Questo modulo è l'UNICA interfaccia verso il backend DOS68K.
+This module is the ONLY interface towards the DOS68K backend.
 
-Endpoint usati:
-  POST /sessions                → crea una nuova sessione
-  POST /queries/{session_id}    → invia domanda, riceve risposta
-  DELETE /sessions/{session_id} → elimina la sessione (comando reset)
-  POST /sessions/{session_id}/clear → resetta la storia della sessione
+Endpoints used:
+  POST /sessions                → creates a new session
+  POST /queries/{session_id}    → sends a question, receives answer
+  DELETE /sessions/{session_id} → deletes the session (reset command)
+  POST /sessions/{session_id}/clear → resets the session history
 
-Autenticazione:
-  x-api-key    → CHATBOT_API_KEY  (tutte le richieste)
-  x-user-id    → UUID derivato dallo slack_user_id (tutte le richieste)
-  X-User-Role  → stesso UUID di x-user-id (tutte le richieste)
+Authentication:
+  x-api-key    → CHATBOT_API_KEY  (all requests)
+  x-user-id    → UUID derived from slack_user_id (all requests)
+  X-User-Role  → same UUID as x-user-id (all requests)
 """
 
 import logging
@@ -35,12 +35,12 @@ class ChatbotAPIError(Exception):
 
 
 class SessionNotFoundError(ChatbotAPIError):
-    """Sessione non trovata o scaduta lato DOS68K."""
+    """Session not found or expired on the DOS68K side."""
     pass
 
 
 class DOS68KClient:
-    """Client asincrono verso le API DOS68K."""
+    """Async client for the DOS68K APIs."""
 
     def __init__(self):
         self._client = httpx.AsyncClient(
@@ -54,15 +54,15 @@ class DOS68KClient:
 
     def _user_headers(self, slack_user_id: str) -> dict:
         """
-        Deriva un UUID stabile dall'ID Slack per l'header x-user-id.
-        uuid5 è deterministico: stesso slack_user_id → stesso UUID sempre.
+        Derives a stable UUID from the Slack ID for the x-user-id header.
+        uuid5 is deterministic: same slack_user_id → same UUID always.
         """
         user_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"slack:{slack_user_id}"))
         return {"x-user-id": user_uuid, "X-User-Role": user_uuid}
 
     async def create_session(self, slack_user_id: str, title: str = "Slack Chat") -> str:
-        """Crea una nuova sessione su DOS68K e restituisce il session_id."""
-        logger.info(f"Creazione sessione DOS68K per user={self._user_headers(slack_user_id)} title={title}")
+        """Creates a new session on DOS68K and returns the session_id."""
+        logger.info(f"Creating DOS68K session for user={self._user_headers(slack_user_id)} title={title}")
         resp = await self._client.post(
             "/sessions",
             json={"title": title, "isTemporary": False},
@@ -70,29 +70,29 @@ class DOS68KClient:
         )
         self._raise_for_status(resp)
         session_id = resp.json()["id"]
-        logger.info(f"Sessione DOS68K creata: session_id={session_id} user={slack_user_id}")
+        logger.info(f"DOS68K session created: session_id={session_id} user={slack_user_id}")
         return session_id
 
 
     async def get_session(self, slack_user_id: str, session_id: str) -> dict:
         """
-        Verifica che la sessione esista su DOS68K.
-        Usato da `resume` per validare l'ID fornito dall'utente.
-        Solleva SessionNotFoundError se la sessione non esiste o è scaduta.
+        Verifies that the session exists on DOS68K.
+        Used by `resume` to validate the ID provided by the user.
+        Raises SessionNotFoundError if the session does not exist or has expired.
         """
         resp = await self._client.get(
             f"/sessions/{session_id}",
             headers=self._user_headers(slack_user_id),
         )
         if resp.status_code == 404:
-            raise SessionNotFoundError(404, f"Sessione {session_id} non trovata")
+            raise SessionNotFoundError(404, f"Session {session_id} not found")
         self._raise_for_status(resp)
         return resp.json()
 
     async def list_sessions(self, slack_user_id: str) -> list[dict]:
         """
-        Recupera tutte le sessioni dell'utente da DOS68K.
-        Usato dal comando `list`.
+        Retrieves all user sessions from DOS68K.
+        Used by the `list` command.
         """
         resp = await self._client.get(
             "/sessions/all",
@@ -105,7 +105,7 @@ class DOS68KClient:
         return data.get("sessions", [])
 
     async def send_query(self, slack_user_id: str, session_id: str, question: str) -> str:
-        """Invia una domanda al chatbot e restituisce la risposta testuale."""
+        """Sends a question to the chatbot and returns the text answer."""
         logger.info(f"Query → session={session_id} question={question[:80]}...")
         resp = await self._client.post(
             f"/queries/{session_id}",
@@ -123,25 +123,25 @@ class DOS68KClient:
         )
 
     async def delete_session(self, slack_user_id: str, session_id: str) -> None:
-        """Elimina definitivamente la sessione su DOS68K."""
+        """Permanently deletes the session on DOS68K."""
         resp = await self._client.delete(
             f"/sessions/{session_id}",
             headers=self._user_headers(slack_user_id),
         )
         if resp.status_code == 404:
-            logger.warning(f"Sessione {session_id} già assente su DOS68K, ignorato")
+            logger.warning(f"Session {session_id} already absent on DOS68K, ignoring")
             return
         self._raise_for_status(resp)
-        logger.info(f"Sessione {session_id} eliminata su DOS68K")
+        logger.info(f"Session {session_id} deleted on DOS68K")
 
     async def clear_session(self, slack_user_id: str, session_id: str) -> None:
-        """Resetta la storia della sessione (mantiene la sessione aperta)."""
+        """Resets the session history (keeps the session open)."""
         resp = await self._client.post(
             f"/sessions/{session_id}/clear",
             headers=self._user_headers(slack_user_id),
         )
         self._raise_for_status(resp)
-        logger.info(f"Sessione {session_id} resettata")
+        logger.info(f"Session {session_id} cleared")
 
     async def close(self):
         await self._client.aclose()

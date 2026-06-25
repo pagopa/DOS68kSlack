@@ -1,5 +1,5 @@
 """
-Verifica la firma delle richieste Slack.
+Verifies the signature of Slack requests.
 https://api.slack.com/authentication/verifying-requests-from-slack
 """
 
@@ -19,23 +19,23 @@ class SlackVerificationError(Exception):
 
 def verify_slack_request(headers: dict, body: str) -> None:
     """
-    Verifica che la richiesta provenga realmente da Slack.
-    Solleva SlackVerificationError se la verifica fallisce.
+    Verifies that the request genuinely comes from Slack.
+    Raises SlackVerificationError if verification fails.
     """
     timestamp = headers.get("x-slack-request-timestamp", "")
     signature = headers.get("x-slack-signature", "")
 
     if not timestamp or not signature:
-        raise SlackVerificationError("Header Slack mancanti")
+        raise SlackVerificationError("Missing Slack headers")
 
     try:
         ts = int(timestamp)
     except ValueError:
-        raise SlackVerificationError("Timestamp non valido")
+        raise SlackVerificationError("Invalid timestamp")
 
-    # Protegge da replay attack: richieste più vecchie di 5 minuti vengono rifiutate
+    # Replay attack protection: requests older than 5 minutes are rejected
     if abs(time.time() - ts) > 300:
-        raise SlackVerificationError("Request troppo vecchia (possibile replay attack)")
+        raise SlackVerificationError("Request too old (possible replay attack)")
 
     sig_basestring = f"v0:{timestamp}:{body}"
     expected = "v0=" + hmac.new(
@@ -45,4 +45,4 @@ def verify_slack_request(headers: dict, body: str) -> None:
     ).hexdigest()
 
     if not hmac.compare_digest(expected, signature):
-        raise SlackVerificationError("Firma Slack non valida")
+        raise SlackVerificationError("Invalid Slack signature")

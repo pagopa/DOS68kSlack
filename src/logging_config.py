@@ -1,9 +1,9 @@
 """
-Configurazione del logging.
+Logging configuration.
 
-Punto aperto #4: filtro per escludere dai log le chiamate agli
-endpoint di health check, controllabile via variabile d'ambiente
-LOG_HEALTH_CHECKS (default: False = non loggati).
+Filter to exclude health check endpoint calls from logs,
+controlled via the LOG_HEALTH_CHECKS environment variable
+(default: False = not logged).
 """
 
 import logging
@@ -11,7 +11,7 @@ import os
 
 
 class HealthCheckFilter(logging.Filter):
-    """Filtra le righe di log relative agli health check."""
+    """Filters log records related to health checks."""
 
     HEALTH_PATHS = {"/health", "/health/db"}
 
@@ -32,7 +32,7 @@ def setup_logging() -> None:
         datefmt="%Y-%m-%dT%H:%M:%S",
     )
 
-    # Applica il filtro al root logger e a uvicorn.access
+    # Apply the filter to the root logger and uvicorn.access
     health_filter = HealthCheckFilter()
     logging.getLogger().addFilter(health_filter)
 
