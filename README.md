@@ -122,34 +122,22 @@ processed events (TTL: 5 minutes).
 git clone <repo-url>
 cd dos68k-slack-bot
 
-# 2. Create and activate a virtual environment
-python3 -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
+# 2. Install dependencies (creates .venv automatically)
+uv sync
 
-# 3. Install dependencies
-pip install -r requirements.txt -r requirements-dev.txt
-
-# 4. Configure environment variables
+# 3. Configure environment variables
 cp .env.example .env
 # Edit .env with your actual values
 
-# 5. Run tests
-pytest tests/ -v
+# 4. Run tests
+uv run pytest tests/ -v
 
-# 6. Start the server
-uvicorn src.app:app --reload --port 8000
+# 5. Start the server
+uv run uvicorn src.app:app --reload --port 8000
 
-# 7. Expose locally via ngrok (in a separate terminal)
+# 6. Expose locally via ngrok (in a separate terminal)
 ngrok http 8000
 # Copy the HTTPS URL and set it as the Request URL in Slack Event Subscriptions
-```
-
-Or using the Makefile:
-
-```bash
-make install   # create venv and install dependencies
-make run       # start the server
-make test      # run tests
 ```
 
 ---
