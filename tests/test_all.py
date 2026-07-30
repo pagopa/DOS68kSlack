@@ -31,12 +31,15 @@ def env_vars(monkeypatch):
     monkeypatch.setenv("LOG_LEVEL", "INFO")
 
 
-def _make_slack_signature(body: str, secret: str = FAKE_SIGNING_SECRET) -> tuple[str, str]:
+def _make_slack_signature(
+    body: str, secret: str = FAKE_SIGNING_SECRET
+) -> tuple[str, str]:
     timestamp = str(int(time.time()))
     sig_basestring = f"v0:{timestamp}:{body}"
-    signature = "v0=" + hmac.new(
-        secret.encode(), sig_basestring.encode(), hashlib.sha256
-    ).hexdigest()
+    signature = (
+        "v0="
+        + hmac.new(secret.encode(), sig_basestring.encode(), hashlib.sha256).hexdigest()
+    )
     return timestamp, signature
 
 
@@ -44,10 +47,11 @@ def _make_slack_signature(body: str, secret: str = FAKE_SIGNING_SECRET) -> tuple
 # Test: slack_verifier
 # ---------------------------------------------------------------------------
 
-class TestSlackVerifier:
 
+class TestSlackVerifier:
     def test_valid_signature_passes(self):
         from src.slack_verifier import verify_slack_request
+
         body = '{"type": "url_verification"}'
         ts, sig = _make_slack_signature(body)
         headers = {"x-slack-request-timestamp": ts, "x-slack-signature": sig}
@@ -55,6 +59,7 @@ class TestSlackVerifier:
 
     def test_invalid_signature_raises(self):
         from src.slack_verifier import verify_slack_request, SlackVerificationError
+
         body = '{"type": "message"}'
         ts, _ = _make_slack_signature(body)
         headers = {
@@ -66,18 +71,23 @@ class TestSlackVerifier:
 
     def test_old_timestamp_raises(self):
         from src.slack_verifier import verify_slack_request, SlackVerificationError
+
         body = '{"type": "message"}'
         old_ts = str(int(time.time()) - 400)
         sig_basestring = f"v0:{old_ts}:{body}"
-        sig = "v0=" + hmac.new(
-            FAKE_SIGNING_SECRET.encode(), sig_basestring.encode(), hashlib.sha256
-        ).hexdigest()
+        sig = (
+            "v0="
+            + hmac.new(
+                FAKE_SIGNING_SECRET.encode(), sig_basestring.encode(), hashlib.sha256
+            ).hexdigest()
+        )
         headers = {"x-slack-request-timestamp": old_ts, "x-slack-signature": sig}
         with pytest.raises(SlackVerificationError, match="troppo vecchia"):
             verify_slack_request(headers, body)
 
     def test_missing_headers_raises(self):
         from src.slack_verifier import verify_slack_request, SlackVerificationError
+
         with pytest.raises(SlackVerificationError, match="mancanti"):
             verify_slack_request({}, '{"type": "message"}')
 
@@ -86,11 +96,12 @@ class TestSlackVerifier:
 # Test: chatbot_client
 # ---------------------------------------------------------------------------
 
-class TestDOS68KClient:
 
+class TestDOS68KClient:
     @pytest.mark.asyncio
     async def test_create_session_returns_id(self):
         from src.chatbot_client import DOS68KClient
+
         client = DOS68KClient()
 
         mock_response = MagicMock()
@@ -103,33 +114,99 @@ class TestDOS68KClient:
             "expiresAt": None,
         }
 
-        with patch.object(client._client, "post", new=AsyncMock(return_value=mock_response)):
+        with patch.object(
+            client._client, "post", new=AsyncMock(return_value=mock_response)
+        ):
             session_id = await client.create_session("USLACK123")
             assert session_id == "session-123"
 
     @pytest.mark.asyncio
-    async def test_send_query_returns_answer(self):
+    async def test_send_query_returns_answer_and_context(self):
         from src.chatbot_client import DOS68KClient
+
         client = DOS68KClient()
 
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {"answer": "Sono il chatbot DOS68K di PagoPA!"}
+        mock_response.json.return_value = {
+            "answer": "Sono il chatbot DOS68K di PagoPA!",
+            "context": [
+                {
+                    "content": "chunk",
+                    "title": "Primo accesso",
+                    "url": "https://developer.pagopa.it/primo-accesso",
+                }
+            ],
+        }
 
-        with patch.object(client._client, "post", new=AsyncMock(return_value=mock_response)):
-            answer = await client.send_query("USLACK123", "sess-abc", "Chi sei?")
+        with patch.object(
+            client._client, "post", new=AsyncMock(return_value=mock_response)
+        ):
+            answer, context = await client.send_query(
+                "USLACK123", "sess-abc", "Chi sei?"
+            )
             assert "DOS68K" in answer
+            assert context[0]["url"] == "https://developer.pagopa.it/primo-accesso"
+
+    @pytest.mark.asyncio
+    async def test_send_query_prefers_references_over_context(self):
+        """Le references sono già filtrate lato DOS68K sui documenti recuperati:
+        vanno preferite ai chunk grezzi del context."""
+        from src.chatbot_client import DOS68KClient
+
+        client = DOS68KClient()
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "answer": "Risposta",
+            "references": [
+                {"title": "Citato", "url": "https://developer.pagopa.it/citato"}
+            ],
+            "context": [
+                {"title": "Recuperato", "url": "https://developer.pagopa.it/altro"}
+            ],
+        }
+
+        with patch.object(
+            client._client, "post", new=AsyncMock(return_value=mock_response)
+        ):
+            _, sources = await client.send_query("USLACK123", "sess-abc", "domanda")
+            assert [s["url"] for s in sources] == ["https://developer.pagopa.it/citato"]
+
+    @pytest.mark.asyncio
+    async def test_send_query_without_context_returns_empty_list(self):
+        """Una risposta senza context non deve rompere la citazione delle fonti."""
+        from src.chatbot_client import DOS68KClient
+
+        client = DOS68KClient()
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"answer": "Non lo so."}
+
+        with patch.object(
+            client._client, "post", new=AsyncMock(return_value=mock_response)
+        ):
+            answer, context = await client.send_query(
+                "USLACK123", "sess-abc", "domanda"
+            )
+            assert answer == "Non lo so."
+            assert context == []
 
     @pytest.mark.asyncio
     async def test_send_query_raises_on_error(self):
         from src.chatbot_client import DOS68KClient, ChatbotAPIError
+
         client = DOS68KClient()
 
         mock_response = MagicMock()
         mock_response.status_code = 500
         mock_response.text = "Internal Server Error"
 
-        with patch.object(client._client, "post", new=AsyncMock(return_value=mock_response)):
+        with patch.object(
+            client._client, "post", new=AsyncMock(return_value=mock_response)
+        ):
             with pytest.raises(ChatbotAPIError) as exc_info:
                 await client.send_query("USLACK123", "sess-abc", "domanda")
             assert exc_info.value.status_code == 500
@@ -137,54 +214,173 @@ class TestDOS68KClient:
     @pytest.mark.asyncio
     async def test_get_session_raises_not_found(self):
         from src.chatbot_client import DOS68KClient, SessionNotFoundError
+
         client = DOS68KClient()
 
         mock_response = MagicMock()
         mock_response.status_code = 404
 
-        with patch.object(client._client, "get", new=AsyncMock(return_value=mock_response)):
+        with patch.object(
+            client._client, "get", new=AsyncMock(return_value=mock_response)
+        ):
             with pytest.raises(SessionNotFoundError):
                 await client.get_session("USLACK123", "sess-nonexistent")
+
+
+# ---------------------------------------------------------------------------
+# Test: citazione delle fonti nella risposta Slack
+# ---------------------------------------------------------------------------
+
+
+class TestFormatSources:
+    def test_sources_rendered_as_slack_links(self):
+        """Ogni fonte deve essere cliccabile: titolo del documento + link."""
+        from src.slack_handler import format_sources
+
+        block = format_sources(
+            [
+                {
+                    "title": "Primo accesso",
+                    "url": "https://developer.pagopa.it/primo-accesso",
+                },
+                {
+                    "title": "Riscossione della TARI",
+                    "url": "https://developer.pagopa.it/tari",
+                },
+            ]
+        )
+
+        assert block == (
+            "📚 *Fonti:*\n"
+            "• <https://developer.pagopa.it/primo-accesso|Primo accesso>\n"
+            "• <https://developer.pagopa.it/tari|Riscossione della TARI>"
+        )
+
+    def test_same_document_cited_once(self):
+        """Più chunk dello stesso documento non devono generare link duplicati."""
+        from src.slack_handler import format_sources
+
+        block = format_sources(
+            [
+                {"title": "Primo accesso", "url": "https://developer.pagopa.it/a"},
+                {"title": "Primo accesso", "url": "https://developer.pagopa.it/a"},
+                {"title": "Altro", "url": "https://developer.pagopa.it/b"},
+            ]
+        )
+
+        assert block.count("• ") == 2
+
+    def test_sources_capped(self):
+        from src.slack_handler import format_sources, _MAX_SOURCES
+
+        block = format_sources(
+            [
+                {"title": f"Doc {i}", "url": f"https://developer.pagopa.it/{i}"}
+                for i in range(_MAX_SOURCES + 3)
+            ]
+        )
+
+        assert block.count("• ") == _MAX_SOURCES
+
+    def test_chunks_without_url_are_skipped(self):
+        """Senza url la fonte non è raggiungibile: meglio ometterla che citarla."""
+        from src.slack_handler import format_sources
+
+        assert format_sources([{"title": "Senza link", "url": None}]) == ""
+        assert format_sources([]) == ""
+
+    def test_missing_title_falls_back_to_url(self):
+        from src.slack_handler import format_sources
+
+        block = format_sources([{"url": "https://developer.pagopa.it/a"}])
+
+        assert block == (
+            "📚 *Fonti:*\n"
+            "• <https://developer.pagopa.it/a|https://developer.pagopa.it/a>"
+        )
+
+    def test_title_special_characters_escaped(self):
+        """I caratteri riservati di mrkdwn nel titolo romperebbero il link."""
+        from src.slack_handler import format_sources
+
+        block = format_sources(
+            [{"title": "Enti & PSP <test>", "url": "https://developer.pagopa.it/a"}]
+        )
+
+        assert "Enti &amp; PSP &lt;test&gt;" in block
+
+    def test_answer_unchanged_when_no_sources(self):
+        from src.slack_handler import _with_sources
+
+        assert _with_sources("La risposta", []) == "La risposta"
+
+    def test_sources_appended_to_answer(self):
+        from src.slack_handler import _with_sources
+
+        message = _with_sources(
+            "La risposta", [{"title": "Doc", "url": "https://developer.pagopa.it/a"}]
+        )
+
+        assert message.startswith("La risposta\n\n")
+        assert "📚 *Fonti:*" in message
 
 
 # ---------------------------------------------------------------------------
 # Test: logging_config (punto aperto #4)
 # ---------------------------------------------------------------------------
 
-class TestHealthCheckFilter:
 
+class TestHealthCheckFilter:
     def test_health_check_filtered_when_disabled(self, monkeypatch):
         import logging
+
         monkeypatch.setenv("LOG_HEALTH_CHECKS", "false")
         from src.logging_config import HealthCheckFilter
+
         f = HealthCheckFilter()
         record = logging.LogRecord(
-            name="uvicorn.access", level=logging.INFO,
-            pathname="", lineno=0,
-            msg="GET /health HTTP/1.1 200", args=(), exc_info=None
+            name="uvicorn.access",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="GET /health HTTP/1.1 200",
+            args=(),
+            exc_info=None,
         )
         assert f.filter(record) is False
 
     def test_health_check_allowed_when_enabled(self, monkeypatch):
         import logging
+
         monkeypatch.setenv("LOG_HEALTH_CHECKS", "true")
         from src.logging_config import HealthCheckFilter
+
         f = HealthCheckFilter()
         record = logging.LogRecord(
-            name="uvicorn.access", level=logging.INFO,
-            pathname="", lineno=0,
-            msg="GET /health HTTP/1.1 200", args=(), exc_info=None
+            name="uvicorn.access",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="GET /health HTTP/1.1 200",
+            args=(),
+            exc_info=None,
         )
         assert f.filter(record) is True
 
     def test_normal_log_always_passes(self, monkeypatch):
         import logging
+
         monkeypatch.setenv("LOG_HEALTH_CHECKS", "false")
         from src.logging_config import HealthCheckFilter
+
         f = HealthCheckFilter()
         record = logging.LogRecord(
-            name="app", level=logging.INFO,
-            pathname="", lineno=0,
-            msg="POST /queries/abc 200", args=(), exc_info=None
+            name="app",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="POST /queries/abc 200",
+            args=(),
+            exc_info=None,
         )
         assert f.filter(record) is True

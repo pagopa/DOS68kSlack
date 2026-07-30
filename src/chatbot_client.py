@@ -36,6 +36,7 @@ class ChatbotAPIError(Exception):
 
 class SessionNotFoundError(ChatbotAPIError):
     """Sessione non trovata o scaduta lato DOS68K."""
+
     pass
 
 
@@ -60,9 +61,13 @@ class DOS68KClient:
         user_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"slack:{slack_user_id}"))
         return {"x-user-id": user_uuid, "x-user-role": "user"}
 
-    async def create_session(self, slack_user_id: str, title: str = "Slack Chat") -> str:
+    async def create_session(
+        self, slack_user_id: str, title: str = "Slack Chat"
+    ) -> str:
         """Crea una nuova sessione su DOS68K e restituisce il session_id."""
-        logger.info(f"Creazione sessione DOS68K per user={self._user_headers(slack_user_id)} title={title}")
+        logger.info(
+            f"Creazione sessione DOS68K per user={self._user_headers(slack_user_id)} title={title}"
+        )
         resp = await self._client.post(
             "/sessions",
             json={"title": title, "isTemporary": False},
@@ -70,9 +75,10 @@ class DOS68KClient:
         )
         self._raise_for_status(resp)
         session_id = resp.json()["id"]
-        logger.info(f"Sessione DOS68K creata: session_id={session_id} user={slack_user_id}")
+        logger.info(
+            f"Sessione DOS68K creata: session_id={session_id} user={slack_user_id}"
+        )
         return session_id
-
 
     async def get_session(self, slack_user_id: str, session_id: str) -> dict:
         """
@@ -104,8 +110,19 @@ class DOS68KClient:
             return data
         return data.get("sessions", [])
 
-    async def send_query(self, slack_user_id: str, session_id: str, question: str) -> str:
-        """Invia una domanda al chatbot e restituisce la risposta testuale."""
+    async def send_query(
+        self, slack_user_id: str, session_id: str, question: str
+    ) -> tuple[str, list[dict]]:
+        """
+        Invia una domanda al chatbot.
+
+        Restituisce (risposta testuale, fonti). Ogni fonte ha `title` e `url`
+        del documento, usati per citarla nella risposta Slack.
+
+        Le fonti sono le `references` scelte dall'agente (già filtrate lato
+        DOS68K sui documenti effettivamente recuperati). Se il backend non le
+        espone si ripiega sui chunk di `context`, che portano gli stessi campi.
+        """
         logger.info(f"Query → session={session_id} question={question[:80]}...")
         resp = await self._client.post(
             f"/queries/{session_id}",
@@ -114,13 +131,14 @@ class DOS68KClient:
         )
         self._raise_for_status(resp)
         data = resp.json()
-        return (
+        answer = (
             data.get("answer")
             or data.get("response")
             or data.get("content")
             or data.get("text")
             or str(data)
         )
+        return answer, data.get("references") or data.get("context") or []
 
     async def delete_session(self, slack_user_id: str, session_id: str) -> None:
         """Elimina definitivamente la sessione su DOS68K."""
