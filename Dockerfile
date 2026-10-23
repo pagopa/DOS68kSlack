@@ -1,7 +1,7 @@
 # ---- Build stage ----
-FROM python:3.12-slim AS builder
+FROM python:3.12-slim@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704 AS builder
 
-COPY --from=ghcr.io/astral-sh/uv:0.4.30 /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.4.30@sha256:341e448d2ca38f11d8e2768db5464b4c95a4d87f539b8cb7511db86b02fef97e /uv /uvx /bin/
 
 WORKDIR /app
 
@@ -11,7 +11,7 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY src/ ./src/
 
 # ---- Final stage ----
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704
 
 # Non root user per sicurezza
 RUN groupadd -r appuser && useradd -r -g appuser appuser
